@@ -95,12 +95,14 @@ RUN apt-get update && \
         python-is-python3 \
         python3-dev llvm \
         python3-venv && \
+        python3-grpcio-tools && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/* && \
-    pip install --upgrade pip
+    rm -rf /var/lib/apt/lists/* 
+    # && \
+   # pip install --upgrade pip --break-system-packages
 
-# Install grpcio-tools (the version in 22.04 is too old)
-RUN pip install --user grpcio-tools
+# Install grpcio-tools (the version in 24.04 is too old)
+#RUN pip install --user grpcio-tools --break-system-packages
 
 ###################################
 ###################################
