@@ -6,11 +6,11 @@ BINARY_NAME=local-ai
 DETECT_LIBS?=true
 
 # llama.cpp versions
-CPPLLAMA_VERSION?=e83ba3e460651b20a594e9f2f0f0bffb998d3ce1
+CPPLLAMA_VERSION?=e562eece7cb476276bfc4cbb18deb7c0369b2233
 
 # whisper.cpp version
 WHISPER_REPO?=https://github.com/ggml-org/whisper.cpp
-WHISPER_CPP_VERSION?=98dfe8dc264b7d0d1daccfff9a9c043bcc2ece4b
+WHISPER_CPP_VERSION?=7fd6fa809749078aa00edf945e959c898f2bd1af
 
 # go-piper version
 PIPER_REPO?=https://github.com/mudler/go-piper
