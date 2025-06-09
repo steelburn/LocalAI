@@ -18,6 +18,43 @@ type GalleryModel struct {
 	Overrides map[string]interface{} `json:"overrides,omitempty" yaml:"overrides,omitempty"`
 }
 
+func (m *GalleryModel) SetGallery(gallery config.Gallery) {
+	m.Gallery = gallery
+}
+
+func (m *GalleryModel) SetInstalled(installed bool) {
+	m.Installed = installed
+}
+
+func (m *GalleryModel) GetName() string {
+	return m.Name
+}
+
+func (m *GalleryModel) GetGallery() config.Gallery {
+	return m.Gallery
+}
+
+type GalleryBackend struct {
+	Metadata `json:",inline" yaml:",inline"`
+	URI      string `json:"uri,omitempty" yaml:"uri,omitempty"`
+}
+
+func (m *GalleryBackend) SetGallery(gallery config.Gallery) {
+	m.Gallery = gallery
+}
+
+func (m *GalleryBackend) SetInstalled(installed bool) {
+	m.Installed = installed
+}
+
+func (m *GalleryBackend) GetName() string {
+	return m.Name
+}
+
+func (m *GalleryBackend) GetGallery() config.Gallery {
+	return m.Gallery
+}
+
 type Metadata struct {
 	URL         string   `json:"url,omitempty" yaml:"url,omitempty"`
 	Name        string   `json:"name,omitempty" yaml:"name,omitempty"`
@@ -39,6 +76,7 @@ func (m GalleryModel) ID() string {
 }
 
 type GalleryModels []*GalleryModel
+type GalleryBackends []*GalleryBackend
 
 func (gm GalleryModels) Search(term string) GalleryModels {
 	var filteredModels GalleryModels

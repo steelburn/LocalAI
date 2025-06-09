@@ -1,7 +1,6 @@
 package gallery
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,7 +9,6 @@ import (
 	"dario.cat/mergo"
 	"github.com/mudler/LocalAI/core/config"
 	"github.com/mudler/LocalAI/pkg/downloader"
-	"github.com/mudler/LocalAI/pkg/utils"
 	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v2"
 )
@@ -78,7 +76,7 @@ func InstallModelFromGallery(galleries []config.Gallery, name string, basePath s
 		return err
 	}
 
-	model := FindModel(models, name, basePath)
+	model := FindGalleryElement(models, name, basePath)
 	if model == nil {
 		return fmt.Errorf("no model found with name %q", name)
 	}
@@ -86,24 +84,28 @@ func InstallModelFromGallery(galleries []config.Gallery, name string, basePath s
 	return applyModel(model)
 }
 
-func FindModel(models []*GalleryModel, name string, basePath string) *GalleryModel {
-	var model *GalleryModel
+type GalleryElement interface {
+	SetGallery(gallery config.Gallery)
+	SetInstalled(installed bool)
+	GetName() string
+	GetGallery() config.Gallery
+}
+
+func FindGalleryElement[T GalleryElement](models []T, name string, basePath string) T {
+	var model T
 	name = strings.ReplaceAll(name, string(os.PathSeparator), "__")
 
 	if !strings.Contains(name, "@") {
 		for _, m := range models {
-			if strings.EqualFold(m.Name, name) {
+			if strings.EqualFold(m.GetName(), name) {
 				model = m
 				break
 			}
 		}
 
-		if model == nil {
-			return nil
-		}
 	} else {
 		for _, m := range models {
-			if strings.EqualFold(name, fmt.Sprintf("%s@%s", m.Gallery.Name, m.Name)) {
+			if strings.EqualFold(name, fmt.Sprintf("%s@%s", m.GetGallery().Name, m.GetName())) {
 				model = m
 				break
 			}
@@ -121,7 +123,23 @@ func AvailableGalleryModels(galleries []config.Gallery, basePath string) (Galler
 
 	// Get models from galleries
 	for _, gallery := range galleries {
-		galleryModels, err := getGalleryModels(gallery, basePath)
+		galleryModels, err := getGalleryModels[*GalleryModel](gallery, basePath)
+		if err != nil {
+			return nil, err
+		}
+		models = append(models, galleryModels...)
+	}
+
+	return models, nil
+}
+
+// List available backends
+func AvailableBackends(galleries []config.Gallery, basePath string) (GalleryBackends, error) {
+	var models []*GalleryBackend
+
+	// Get models from galleries
+	for _, gallery := range galleries {
+		galleryModels, err := getGalleryModels[*GalleryBackend](gallery, basePath)
 		if err != nil {
 			return nil, err
 		}
@@ -146,8 +164,8 @@ func findGalleryURLFromReferenceURL(url string, basePath string) (string, error)
 	return refFile, err
 }
 
-func getGalleryModels(gallery config.Gallery, basePath string) ([]*GalleryModel, error) {
-	var models []*GalleryModel = []*GalleryModel{}
+func getGalleryModels[T GalleryElement](gallery config.Gallery, basePath string) ([]T, error) {
+	var models []T = []T{}
 
 	if strings.HasSuffix(gallery.URL, ".ref") {
 		var err error
@@ -170,97 +188,12 @@ func getGalleryModels(gallery config.Gallery, basePath string) ([]*GalleryModel,
 
 	// Add gallery to models
 	for _, model := range models {
-		model.Gallery = gallery
+		model.SetGallery(gallery)
 		// we check if the model was already installed by checking if the config file exists
 		// TODO: (what to do if the model doesn't install a config file?)
-		if _, err := os.Stat(filepath.Join(basePath, fmt.Sprintf("%s.yaml", model.Name))); err == nil {
-			model.Installed = true
+		if _, err := os.Stat(filepath.Join(basePath, fmt.Sprintf("%s.yaml", model.GetName()))); err == nil {
+			model.SetInstalled(true)
 		}
 	}
 	return models, nil
-}
-
-func GetLocalModelConfiguration(basePath string, name string) (*Config, error) {
-	name = strings.ReplaceAll(name, string(os.PathSeparator), "__")
-	galleryFile := filepath.Join(basePath, galleryFileName(name))
-	return ReadConfigFile(galleryFile)
-}
-
-func DeleteModelFromSystem(basePath string, name string, additionalFiles []string) error {
-	// os.PathSeparator is not allowed in model names. Replace them with "__" to avoid conflicts with file paths.
-	name = strings.ReplaceAll(name, string(os.PathSeparator), "__")
-
-	configFile := filepath.Join(basePath, fmt.Sprintf("%s.yaml", name))
-
-	galleryFile := filepath.Join(basePath, galleryFileName(name))
-
-	for _, f := range []string{configFile, galleryFile} {
-		if err := utils.VerifyPath(f, basePath); err != nil {
-			return fmt.Errorf("failed to verify path %s: %w", f, err)
-		}
-	}
-
-	var err error
-	// Delete all the files associated to the model
-	// read the model config
-	galleryconfig, err := ReadConfigFile(galleryFile)
-	if err != nil {
-		log.Error().Err(err).Msgf("failed to read gallery file %s", configFile)
-	}
-
-	var filesToRemove []string
-
-	// Remove additional files
-	if galleryconfig != nil {
-		for _, f := range galleryconfig.Files {
-			fullPath := filepath.Join(basePath, f.Filename)
-			filesToRemove = append(filesToRemove, fullPath)
-		}
-	}
-
-	for _, f := range additionalFiles {
-		fullPath := filepath.Join(filepath.Join(basePath, f))
-		filesToRemove = append(filesToRemove, fullPath)
-	}
-
-	filesToRemove = append(filesToRemove, configFile)
-	filesToRemove = append(filesToRemove, galleryFile)
-
-	// skip duplicates
-	filesToRemove = utils.Unique(filesToRemove)
-
-	// Removing files
-	for _, f := range filesToRemove {
-		if e := os.Remove(f); e != nil {
-			err = errors.Join(err, fmt.Errorf("failed to remove file %s: %w", f, e))
-		}
-	}
-
-	return err
-}
-
-// This is ***NEVER*** going to be perfect or finished.
-// This is a BEST EFFORT function to surface known-vulnerable models to users.
-func SafetyScanGalleryModels(galleries []config.Gallery, basePath string) error {
-	galleryModels, err := AvailableGalleryModels(galleries, basePath)
-	if err != nil {
-		return err
-	}
-	for _, gM := range galleryModels {
-		if gM.Installed {
-			err = errors.Join(err, SafetyScanGalleryModel(gM))
-		}
-	}
-	return err
-}
-
-func SafetyScanGalleryModel(galleryModel *GalleryModel) error {
-	for _, file := range galleryModel.AdditionalFiles {
-		scanResults, err := downloader.HuggingFaceScan(downloader.URI(file.URI))
-		if err != nil && errors.Is(err, downloader.ErrUnsafeFilesFound) {
-			log.Error().Str("model", galleryModel.Name).Strs("clamAV", scanResults.ClamAVInfectedFiles).Strs("pickles", scanResults.DangerousPickles).Msg("Contains unsafe file(s)!")
-			return err
-		}
-	}
-	return nil
 }

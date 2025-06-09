@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"dario.cat/mergo"
+	"github.com/mudler/LocalAI/core/config"
 	lconfig "github.com/mudler/LocalAI/core/config"
 	"github.com/mudler/LocalAI/pkg/downloader"
 	"github.com/mudler/LocalAI/pkg/utils"
@@ -218,4 +220,89 @@ func InstallModel(basePath, nameOverride string, config *Config, configOverrides
 
 func galleryFileName(name string) string {
 	return "._gallery_" + name + ".yaml"
+}
+
+func GetLocalModelConfiguration(basePath string, name string) (*Config, error) {
+	name = strings.ReplaceAll(name, string(os.PathSeparator), "__")
+	galleryFile := filepath.Join(basePath, galleryFileName(name))
+	return ReadConfigFile(galleryFile)
+}
+
+func DeleteModelFromSystem(basePath string, name string, additionalFiles []string) error {
+	// os.PathSeparator is not allowed in model names. Replace them with "__" to avoid conflicts with file paths.
+	name = strings.ReplaceAll(name, string(os.PathSeparator), "__")
+
+	configFile := filepath.Join(basePath, fmt.Sprintf("%s.yaml", name))
+
+	galleryFile := filepath.Join(basePath, galleryFileName(name))
+
+	for _, f := range []string{configFile, galleryFile} {
+		if err := utils.VerifyPath(f, basePath); err != nil {
+			return fmt.Errorf("failed to verify path %s: %w", f, err)
+		}
+	}
+
+	var err error
+	// Delete all the files associated to the model
+	// read the model config
+	galleryconfig, err := ReadConfigFile(galleryFile)
+	if err != nil {
+		log.Error().Err(err).Msgf("failed to read gallery file %s", configFile)
+	}
+
+	var filesToRemove []string
+
+	// Remove additional files
+	if galleryconfig != nil {
+		for _, f := range galleryconfig.Files {
+			fullPath := filepath.Join(basePath, f.Filename)
+			filesToRemove = append(filesToRemove, fullPath)
+		}
+	}
+
+	for _, f := range additionalFiles {
+		fullPath := filepath.Join(filepath.Join(basePath, f))
+		filesToRemove = append(filesToRemove, fullPath)
+	}
+
+	filesToRemove = append(filesToRemove, configFile)
+	filesToRemove = append(filesToRemove, galleryFile)
+
+	// skip duplicates
+	filesToRemove = utils.Unique(filesToRemove)
+
+	// Removing files
+	for _, f := range filesToRemove {
+		if e := os.Remove(f); e != nil {
+			err = errors.Join(err, fmt.Errorf("failed to remove file %s: %w", f, e))
+		}
+	}
+
+	return err
+}
+
+// This is ***NEVER*** going to be perfect or finished.
+// This is a BEST EFFORT function to surface known-vulnerable models to users.
+func SafetyScanGalleryModels(galleries []config.Gallery, basePath string) error {
+	galleryModels, err := AvailableGalleryModels(galleries, basePath)
+	if err != nil {
+		return err
+	}
+	for _, gM := range galleryModels {
+		if gM.Installed {
+			err = errors.Join(err, SafetyScanGalleryModel(gM))
+		}
+	}
+	return err
+}
+
+func SafetyScanGalleryModel(galleryModel *GalleryModel) error {
+	for _, file := range galleryModel.AdditionalFiles {
+		scanResults, err := downloader.HuggingFaceScan(downloader.URI(file.URI))
+		if err != nil && errors.Is(err, downloader.ErrUnsafeFilesFound) {
+			log.Error().Str("model", galleryModel.Name).Strs("clamAV", scanResults.ClamAVInfectedFiles).Strs("pickles", scanResults.DangerousPickles).Msg("Contains unsafe file(s)!")
+			return err
+		}
+	}
+	return nil
 }
